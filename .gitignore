@@ -1,0 +1,8 @@
+# Secrets + stored tokens — never commit
+.env
+tokens.json
+__pycache__/
+*.pyc
+
+# Local virtualenv (Render builds its own in Docker)
+.venv/

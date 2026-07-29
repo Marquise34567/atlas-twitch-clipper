@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: atlas-twitch-clipper
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TWITCH_CLIENT_ID
+        sync: false
+      - key: TWITCH_CLIENT_SECRET
+        sync: false
+      - key: TWITCH_WATCH_CHANNEL
+        sync: false
+      - key: TWITCH_REDIRECT_URI
+        value: https://atlas-twitch-clipper.onrender.com/auth/twitch/callback
+      - key: TWITCH_CATEGORY_FILTER
+        sync: false
+      - key: CLIP_SCORE_THRESHOLD
+        value: "3.0"
+      - key: CLIP_COOLDOWN_SECONDS
+        value: "30"
+      - key: ENABLE_AUDIO_DETECTOR
+        value: "false"
+      - key: PORT
+        value: "8000"
