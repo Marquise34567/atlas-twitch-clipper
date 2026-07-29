@@ -161,7 +161,14 @@ def exchange_code(code: str) -> dict:
         },
         timeout=15,
     )
-    r.raise_for_status()
+    if not r.ok:
+        # Capture Twitch's actual error message for debugging
+        try:
+            err_body = r.json()
+            msg = err_body.get("message", err_body.get("error", r.text))
+        except Exception:
+            msg = r.text
+        raise RuntimeError(f"Twitch token exchange failed ({r.status_code}): {msg}")
     return r.json()
 
 

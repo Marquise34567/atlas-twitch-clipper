@@ -289,6 +289,7 @@ async def auth_exchange(request: Request) -> JSONResponse:
         tokens = exchange_code(code)
         save_user_tokens(tokens)
     except Exception as e:
+        print(f"[bot] token exchange failed: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
     return JSONResponse({"ok": True})
 
