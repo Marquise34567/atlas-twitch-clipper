@@ -11,10 +11,12 @@ services:
         sync: false
       - key: TWITCH_CLIENT_SECRET
         sync: false
-      - key: TWITCH_WATCH_CHANNEL
-        sync: false
       - key: TWITCH_REDIRECT_URI
-        value: https://atlas-twitch-clipper.onrender.com/auth/twitch/callback
+        value: https://www.autoeditor.app/atlas-clips/auth/twitch/callback
+      - key: FRONTEND_URL
+        value: https://www.autoeditor.app
+      - key: CORS_ORIGINS
+        value: https://www.autoeditor.app,http://localhost:5173,http://localhost:3000
       - key: TWITCH_CATEGORY_FILTER
         sync: false
       - key: CLIP_SCORE_THRESHOLD
@@ -24,4 +26,4 @@ services:
       - key: ENABLE_AUDIO_DETECTOR
         value: "false"
       - key: PORT
-        value: "8000"
+        value: "10000"
