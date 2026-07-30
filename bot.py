@@ -64,11 +64,13 @@ class ClipperBot:
         self.cooldown = float(_env("CLIP_COOLDOWN_SECONDS", "30"))
         self.enable_audio = _bool("ENABLE_AUDIO_DETECTOR", False)
         self.audio_spike_db = float(_env("AUDIO_LOUDNESS_SPIKE_DB", "8.0"))
+        self.enable_voice = _bool("ENABLE_VOICE_COMMANDS", True)
 
         self.channel: Optional[str] = None
         self.broadcaster_id: Optional[str] = None
         self.chat: Optional[ChatDetector] = None
         self.audio = None
+        self.voice = None
         self.detector = None
         self.stream_state: dict = {}
         self._stream_error_count = 0
@@ -193,11 +195,21 @@ class ClipperBot:
             except Exception as e:
                 print(f"[bot] audio detector disabled ({e})")
                 self.audio = None
+        if self.enable_voice:
+            try:
+                from voice_command_detector import VoiceCommandDetector
+                self.voice = VoiceCommandDetector(self.channel or "")
+                self.voice.start()
+                print(f"[bot] voice command detector enabled — say 'clip it' to trigger a clip")
+            except Exception as e:
+                print(f"[bot] voice command detector disabled ({e})")
+                self.voice = None
         from detector import DetectorLoop
         self.detector = DetectorLoop(
             broadcaster_id=self.broadcaster_id or "",
             chat=self.chat,
             audio=self.audio,
+            voice=self.voice,
             threshold=self.threshold,
             cooldown=self.cooldown,
         )
@@ -210,6 +222,9 @@ class ClipperBot:
         if self.audio:
             self.audio.stop()
             self.audio = None
+        if self.voice:
+            self.voice.stop()
+            self.voice = None
         if self.chat:
             self.chat.stop()
             self.chat = None
@@ -232,6 +247,9 @@ class ClipperBot:
             "chat_score": round(chat_score, 2),
             "chat_breakdown": chat_breakdown,
             "audio_enabled": bool(self.audio),
+            "voice_enabled": bool(self.voice),
+            "voice_connected": bool(self.voice and self.voice.connected),
+            "voice_last_transcript": self.voice.last_transcript if self.voice else "",
             "threshold": self.threshold,
             "cooldown": self.cooldown,
             "dry_run": _bool("DRY_RUN", False),
@@ -354,6 +372,30 @@ def clipper_stop() -> JSONResponse:
         return JSONResponse({"ok": True, "already_stopped": True})
     bot.stop_watching()
     return JSONResponse({"ok": True, **bot.status()})
+
+
+@app.post("/api/clipper/set-token")
+async def clipper_set_token(request: Request) -> JSONResponse:
+    """Set the OAuth refresh token remotely. This lets the bot survive
+    Render free tier redeploys without re-authorization — the caller
+    sends the refresh token once, and it's stored in memory + file +
+    can be set as an env var for persistence across redeploys."""
+    from twitch_api import save_user_tokens, refresh_user_token, _runtime_token_cache
+    body = await request.json()
+    refresh_token = body.get("refresh_token", "").strip()
+    if not refresh_token:
+        return JSONResponse({"ok": False, "error": "no refresh_token provided"}, status_code=400)
+    try:
+        # Immediately refresh to get a fresh access token + new refresh token
+        refreshed = refresh_user_token(refresh_token)
+        save_user_tokens(refreshed)
+        return JSONResponse({
+            "ok": True,
+            "message": "Token stored. Set TWITCH_REFRESH_TOKEN in Render env vars for permanent persistence.",
+            "new_refresh_token": refreshed.get("refresh_token", ""),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"token refresh failed: {e}"}, status_code=500)
 
 
 @app.get("/api/clipper/status")

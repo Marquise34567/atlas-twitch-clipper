@@ -25,12 +25,14 @@ class DetectorLoop:
         broadcaster_id: str,
         chat: ChatDetector,
         audio=None,  # Optional[AudioDetector]
+        voice=None,  # Optional[VoiceCommandDetector]
         threshold: float = 3.0,
         cooldown: float = 30.0,
     ) -> None:
         self.broadcaster_id = broadcaster_id
         self.chat = chat
         self.audio = audio
+        self.voice = voice
         self.threshold = threshold
         self.cooldown = cooldown
         self._last_clip_at = 0.0
@@ -81,6 +83,18 @@ class DetectorLoop:
                 self._fire(999.0, {"clip_command": True, "sender": sender}, 0.0,
                            reason="!clip command")
                 continue
+
+            # 1b) Check for voice command — streamer said "clip it" out loud.
+            if self.voice:
+                v_triggered, phrase = self.voice.consume_voice_command()
+                if v_triggered:
+                    if now - self._last_clip_at < self.cooldown:
+                        print(f"[detector] voice '{phrase}' — in cooldown, skipping")
+                        continue
+                    print(f"[detector] voice command '{phrase}' — forcing clip")
+                    self._fire(999.0, {"voice_command": True, "phrase": phrase}, 0.0,
+                               reason=f"voice: {phrase}")
+                    continue
 
             # 2) Normal hype detection (chat + audio).
             chat_score, breakdown = self.chat.score()

@@ -29,5 +29,7 @@ services:
         value: "true"
       - key: FALLBACK_CLIP_INTERVAL
         value: "300"
+      - key: ENABLE_VOICE_COMMANDS
+        value: "true"
       - key: PORT
         value: "10000"
