@@ -79,6 +79,10 @@ class ChatDetector:
         self._connected = False
         self._last_score = 0.0
         self._last_breakdown: dict = {}
+        # !clip command — set when someone types !clip in chat.
+        # The detector loop checks this and forces a clip if set.
+        self._clip_command_time: float = 0.0
+        self._clip_command_sender: str = ""
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -101,6 +105,17 @@ class ChatDetector:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    def consume_clip_command(self) -> tuple[bool, str]:
+        """Check if someone typed !clip since the last call. Returns (triggered, sender).
+        Resets the command after reading so it's only consumed once."""
+        with self._lock:
+            if self._clip_command_time > 0:
+                sender = self._clip_command_sender
+                self._clip_command_time = 0.0
+                self._clip_command_sender = ""
+                return True, sender
+            return False, ""
 
     # ── IRC loop ──────────────────────────────────────────────────────────────
     def _run(self) -> None:
@@ -159,9 +174,20 @@ class ChatDetector:
         if not m:
             return
         text = m.group(1).strip()
+        # Extract the sender's username from the IRC prefix:
+        # :nick!nick@nick.tmi.twitch.tv PRIVMSG #chan :message
+        nick_match = re.match(r":([^!]+)!", line)
+        sender = nick_match.group(1).lower() if nick_match else ""
         # Extract emotes from tags if present (emotes=...)
         has_emote_tag = "emotes=" in line and "emotes=" in line.split("PRIVMSG")[0]
         self._record(text, has_emote_tag)
+        # !clip command — anyone in chat (including the streamer) can type
+        # !clip to force a clip. This is the key feature for streamers with
+        # no viewers: the streamer can trigger clips from their own chat.
+        if text.lower().startswith("!clip"):
+            with self._lock:
+                self._clip_command_time = time.time()
+                self._clip_command_sender = sender
 
     # ── scoring ───────────────────────────────────────────────────────────────
     def _record(self, text: str, has_emote_tag: bool) -> None:

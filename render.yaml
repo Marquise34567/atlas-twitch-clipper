@@ -24,6 +24,8 @@ services:
       - key: CLIP_COOLDOWN_SECONDS
         value: "30"
       - key: ENABLE_AUDIO_DETECTOR
-        value: "false"
+        value: "true"
+      - key: FALLBACK_CLIP_INTERVAL
+        value: "300"
       - key: PORT
         value: "10000"
