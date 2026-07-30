@@ -111,6 +111,46 @@ def get_stream(user_login: str) -> Optional[dict]:
     return data[0] if data else None
 
 
+def get_stream_check(user_login: str) -> dict:
+    """Robust stream check that distinguishes API errors from genuinely offline.
+
+    Returns a dict with:
+      - {"live": True,  "stream": {...}}  — stream is live
+      - {"live": False, "stream": None}   — stream is genuinely offline (API succeeded)
+      - {"live": None,  "error": "..."}   — API call failed (unknown state, do NOT
+                                            assume offline; caller should retry)
+    """
+    last_err = ""
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                f"{HELIX}/streams",
+                params={"user_login": user_login},
+                headers=_helix_headers(_app_token.get()),
+                timeout=15,
+            )
+            if r.status_code == 401:
+                # App token may have gone stale — force refresh and retry.
+                _app_token._token = None
+                _app_token._expires_at = 0.0
+                last_err = f"401 Unauthorized (app token refreshed, retrying)"
+                continue
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            if data:
+                return {"live": True, "stream": data[0]}
+            return {"live": False, "stream": None}
+        except requests.exceptions.Timeout:
+            last_err = f"request timeout (attempt {attempt+1}/3)"
+        except requests.exceptions.ConnectionError as e:
+            last_err = f"connection error: {e} (attempt {attempt+1}/3)"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e} (attempt {attempt+1}/3)"
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+    return {"live": None, "error": last_err}
+
+
 def get_user(user_login: str) -> Optional[dict]:
     """Resolve login -> user object (id, login, display_name)."""
     r = requests.get(

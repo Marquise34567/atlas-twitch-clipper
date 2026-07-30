@@ -36,6 +36,7 @@ from twitch_api import (
     create_clip,
     exchange_code,
     get_stream,
+    get_stream_check,
     get_user,
     get_user_from_token,
     get_valid_user_token,
@@ -70,6 +71,8 @@ class ClipperBot:
         self.audio = None
         self.detector = None
         self.stream_state: dict = {}
+        self._stream_error_count = 0
+        self._stream_last_error = ""
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._running = False
@@ -124,7 +127,36 @@ class ClipperBot:
     def _tick(self) -> None:
         if not self.channel:
             return
-        stream = get_stream(self.channel)
+        result = get_stream_check(self.channel)
+
+        # ── API error: don't assume offline, keep detectors running ──
+        if result.get("live") is None:
+            self._stream_error_count += 1
+            err = result.get("error", "unknown error")
+            self._stream_last_error = err
+            print(f"[bot] stream check failed ({self._stream_error_count}x): {err}")
+            # Only after 5 consecutive failures do we give up and stop detectors.
+            if self._stream_error_count >= 5 and self.chat:
+                print(f"[bot] #{self.channel} — too many stream check failures, stopping detectors")
+                self._stop_detectors()
+                self.stream_state = {"live": False, "error": err}
+            else:
+                # Keep previous state but surface the error so the UI can show it.
+                prev_live = self.stream_state.get("live")
+                self.stream_state = {
+                    "live": prev_live if prev_live is not None else False,
+                    "error": err,
+                    "error_count": self._stream_error_count,
+                }
+            return
+
+        # ── API succeeded — reset error counter ──
+        if self._stream_error_count > 0:
+            print(f"[bot] stream check recovered after {self._stream_error_count} failures")
+        self._stream_error_count = 0
+        self._stream_last_error = ""
+
+        stream = result.get("stream")
         if not stream:
             if self.chat:
                 print(f"[bot] #{self.channel} went offline — stopping detectors")
@@ -193,6 +225,8 @@ class ClipperBot:
             "channel": self.channel,
             "category_filter": self.category_filter or None,
             "stream": self.stream_state,
+            "stream_error": self._stream_last_error or None,
+            "stream_error_count": self._stream_error_count,
             "broadcaster_id": self.broadcaster_id,
             "chat_connected": bool(self.chat and self.chat.connected),
             "chat_score": round(chat_score, 2),
@@ -319,6 +353,70 @@ def clipper_stop() -> JSONResponse:
 @app.get("/api/clipper/status")
 def clipper_status() -> dict:
     return bot.status() if bot else {"ok": False}
+
+
+@app.get("/api/clipper/diagnose")
+def clipper_diagnose() -> JSONResponse:
+    """Run live API diagnostics: app token, user token, stream check.
+    Helps troubleshoot 'stream shows offline when actually live' issues."""
+    from twitch_api import get_stream_check, get_user_from_token, get_valid_user_token, client_id, client_secret
+    import requests as _req
+
+    diag: dict = {"ok": True, "checks": {}}
+
+    # 1) App token
+    try:
+        r = _req.post("https://id.twitch.tv/oauth2/token", params={
+            "client_id": client_id(), "client_secret": client_secret(),
+            "grant_type": "client_credentials",
+        }, timeout=15)
+        diag["checks"]["app_token"] = {
+            "status": r.status_code,
+            "ok": r.status_code == 200,
+            "error": r.text[:200] if r.status_code != 200 else None,
+        }
+    except Exception as e:
+        diag["checks"]["app_token"] = {"ok": False, "error": str(e)}
+
+    # 2) User token + resolve
+    token = get_valid_user_token()
+    if not token:
+        diag["checks"]["user_token"] = {"ok": False, "error": "no stored user token — visit /auth/twitch"}
+        diag["ok"] = False
+        return JSONResponse(diag)
+
+    try:
+        user = get_user_from_token(token)
+        if user:
+            diag["checks"]["user_token"] = {
+                "ok": True, "login": user["login"], "id": user["id"],
+                "display_name": user["display_name"],
+            }
+            channel = user["login"]
+        else:
+            diag["checks"]["user_token"] = {"ok": False, "error": "token resolved to no user"}
+            diag["ok"] = False
+            return JSONResponse(diag)
+    except Exception as e:
+        diag["checks"]["user_token"] = {"ok": False, "error": str(e)}
+        diag["ok"] = False
+        return JSONResponse(diag)
+
+    # 3) Stream check
+    result = get_stream_check(channel)
+    if result.get("live") is True:
+        s = result["stream"]
+        diag["checks"]["stream"] = {
+            "ok": True, "live": True, "game": s.get("game_name"),
+            "viewers": s.get("viewer_count"), "type": s.get("type"),
+        }
+    elif result.get("live") is False:
+        diag["checks"]["stream"] = {"ok": True, "live": False, "note": "Twitch API says stream is offline"}
+    else:
+        diag["checks"]["stream"] = {"ok": False, "live": None, "error": result.get("error")}
+        diag["ok"] = False
+
+    return JSONResponse(diag)
 
 
 if __name__ == "__main__":
