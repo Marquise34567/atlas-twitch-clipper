@@ -234,13 +234,45 @@ def save_user_tokens(tokens: dict) -> None:
         "expires_at": time.time() + int(tokens.get("expires_in", 3600)),
         "scope": tokens.get("scope", " ".join(USER_SCOPES)),
     }
-    TOKEN_FILE.write_text(json.dumps(payload, indent=2))
+    # Write to file (works on persistent storage; no-op on ephemeral)
+    try:
+        TOKEN_FILE.write_text(json.dumps(payload, indent=2))
+    except Exception as e:
+        print(f"[twitch] could not write token file: {e}")
+    # Also keep in memory so refreshes work even if the file is wiped
+    _runtime_token_cache["tokens"] = payload
+
+
+# In-memory cache for tokens — survives within a process lifetime even
+# if the filesystem is wiped (Render free tier ephemeral disk).
+_runtime_token_cache: dict = {}
 
 
 def load_user_tokens() -> Optional[dict]:
-    if not TOKEN_FILE.exists():
-        return None
-    return json.loads(TOKEN_FILE.read_text())
+    # 1) Check in-memory cache first (always available within the process)
+    if _runtime_token_cache.get("tokens"):
+        return _runtime_token_cache["tokens"]
+    # 2) Check file (persistent storage)
+    if TOKEN_FILE.exists():
+        try:
+            data = json.loads(TOKEN_FILE.read_text())
+            _runtime_token_cache["tokens"] = data
+            return data
+        except Exception:
+            pass
+    # 3) Fall back to env var (survives redeploys on Render free tier)
+    env_refresh = _env("TWITCH_REFRESH_TOKEN")
+    env_access = _env("TWITCH_ACCESS_TOKEN")
+    if env_refresh or env_access:
+        data = {
+            "access_token": env_access,
+            "refresh_token": env_refresh,
+            "expires_at": 0,  # force refresh on first use
+            "scope": " ".join(USER_SCOPES),
+        }
+        _runtime_token_cache["tokens"] = data
+        return data
+    return None
 
 
 def get_valid_user_token() -> Optional[str]:
@@ -258,7 +290,9 @@ def get_valid_user_token() -> Optional[str]:
             return refreshed["access_token"]
         except Exception as e:
             print(f"[twitch] token refresh failed: {e}")
-            return None
+            # Return the existing access token as a last resort — it might
+            # still work for a few minutes.
+            return stored.get("access_token") or None
     return stored["access_token"]
 
 

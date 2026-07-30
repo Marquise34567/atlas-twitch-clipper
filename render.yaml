@@ -11,6 +11,8 @@ services:
         sync: false
       - key: TWITCH_CLIENT_SECRET
         sync: false
+      - key: TWITCH_REFRESH_TOKEN
+        sync: false
       - key: TWITCH_REDIRECT_URI
         value: https://www.autoeditor.app/atlas-clips/auth/twitch/callback
       - key: FRONTEND_URL

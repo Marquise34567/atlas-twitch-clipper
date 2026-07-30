@@ -325,7 +325,13 @@ async def auth_exchange(request: Request) -> JSONResponse:
     except Exception as e:
         print(f"[bot] token exchange failed: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-    return JSONResponse({"ok": True})
+    # Return the refresh token so the user can save it as an env var on
+    # Render (survives redeploys on the free tier with ephemeral disk).
+    return JSONResponse({
+        "ok": True,
+        "refresh_token": tokens.get("refresh_token", ""),
+        "instructions": "Save this as TWITCH_REFRESH_TOKEN in your Render env vars to survive redeploys.",
+    })
 
 
 @app.post("/api/clipper/start")
