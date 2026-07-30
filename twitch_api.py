@@ -88,6 +88,14 @@ class AppToken:
 _app_token = AppToken()
 
 
+def get_app_token() -> Optional[str]:
+    """Return the current app access token, or None if unavailable."""
+    try:
+        return _app_token.get()
+    except Exception:
+        return None
+
+
 def _helix_headers(token: str) -> dict:
     return {
         "Authorization": f"Bearer {token}",
@@ -332,3 +340,35 @@ def create_clip(broadcaster_id: str, has_delay: bool = False) -> Optional[dict]:
         return None
     data = r.json().get("data", [])
     return data[0] if data else None
+
+
+# ── List clips (user access or app access) ──────────────────────────────────
+def list_clips(broadcaster_id: str, limit: int = 20, started_at: Optional[str] = None) -> list[dict]:
+    """GET /helix/clips — list recent clips for a broadcaster.
+    Returns a list of clip objects with id, title, url, edit_url, thumbnail_url,
+    duration, created_at, etc. Sorted by created_at descending (most recent first).
+    """
+    token = get_valid_user_token()
+    if not token:
+        token = get_app_token()
+    if not token:
+        print("[twitch] list_clips — no token available")
+        return []
+    params: dict = {
+        "broadcaster_id": broadcaster_id,
+        "first": min(limit, 100),
+    }
+    if started_at:
+        params["started_at"] = started_at
+    r = requests.get(
+        f"{HELIX}/clips",
+        params=params,
+        headers=_helix_headers(token),
+        timeout=15,
+    )
+    if not r.ok:
+        print(f"[twitch] list_clips failed {r.status_code}: {r.text}")
+        return []
+    data = r.json().get("data", [])
+    data.sort(key=lambda c: c.get("created_at", ""), reverse=True)
+    return data[:limit]

@@ -413,6 +413,26 @@ def clipper_status() -> dict:
     return bot.status() if bot else {"ok": False}
 
 
+@app.get("/api/clipper/clips")
+def clipper_clips(limit: int = 20) -> JSONResponse:
+    """List recent Twitch clips for the broadcaster. Used by the frontend
+    to show auto-created clips on the Atlas Clips page so users can reframe
+    them without leaving the app."""
+    from twitch_api import list_clips, get_valid_user_token, get_user_from_token
+    token = get_valid_user_token()
+    if not token:
+        return JSONResponse({"ok": False, "error": "no user token", "clips": []}, status_code=401)
+    try:
+        user = get_user_from_token(token)
+        broadcaster_id = user.get("id", "")
+        if not broadcaster_id:
+            return JSONResponse({"ok": False, "error": "could not resolve broadcaster", "clips": []}, status_code=500)
+        clips = list_clips(broadcaster_id, limit=limit)
+        return JSONResponse({"ok": True, "clips": clips, "broadcaster_id": broadcaster_id})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e), "clips": []}, status_code=500)
+
+
 @app.get("/api/clipper/diagnose")
 def clipper_diagnose() -> JSONResponse:
     """Run live API diagnostics: app token, user token, stream check.
