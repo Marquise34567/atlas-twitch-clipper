@@ -33,15 +33,19 @@ TRIGGER_PHRASES = [
 
 # Words that sound like trigger words (common mishearings by Google STT).
 # If the transcript contains any of these, treat it as a trigger.
+# Keep this tight — only words that are very close to "clip".
 FUZZY_TRIGGER_WORDS = [
-    "clip", "klip", "grip", "crip", "flip", "click", "quip", "blip",
-    "snip", "skip", "repeat", "creep", "grip it", "flip it", "click it",
-    "skip it", "snip it", "quip it", "blip it",
+    "clip", "klip", "crip", "flip", "blip", "quip",
+    "creep", "grip", "click",
 ]
 
-# Minimum similarity ratio for fuzzy phrase matching (0.0 to 1.0).
-# Lower = more lenient (more false positives but catches more real triggers).
-FUZZY_THRESHOLD = 0.55
+# Minimum similarity ratio for fuzzy word matching (0.0 to 1.0).
+# Higher = stricter (fewer false positives but might miss some real triggers).
+FUZZY_THRESHOLD = 0.7
+
+# For phrase matching (whole transcript vs trigger phrase), use a higher
+# threshold since we're comparing longer strings.
+FUZZY_PHRASE_THRESHOLD = 0.75
 
 # How often to capture + transcribe an audio chunk (seconds).
 CAPTURE_INTERVAL = 5.0
@@ -61,20 +65,22 @@ def _fuzzy_match(transcript: str) -> Optional[str]:
             return phrase
 
     # 2) Fuzzy word match — if "clip" or a similar-sounding word is in the
-    # transcript, treat it as a trigger. This catches mishearings like
-    # "repeat City" (which contains no "clip" but sounds similar).
+    # transcript, treat it as a trigger. Only match words >= 4 chars to
+    # avoid false positives on short words like "up", "it", "on".
     words = low.replace(",", " ").replace(".", " ").split()
     for word in words:
+        if len(word) < 4:
+            continue
         for trigger_word in FUZZY_TRIGGER_WORDS:
             ratio = SequenceMatcher(None, word, trigger_word).ratio()
             if ratio >= FUZZY_THRESHOLD:
                 return f"fuzzy:{word}~{trigger_word}"
 
     # 3) Fuzzy phrase match — compare the whole transcript against
-    # each trigger phrase.
+    # each trigger phrase. Use a higher threshold for phrases.
     for phrase in TRIGGER_PHRASES:
         ratio = SequenceMatcher(None, low, phrase).ratio()
-        if ratio >= FUZZY_THRESHOLD:
+        if ratio >= FUZZY_PHRASE_THRESHOLD:
             return f"fuzzy:{low}~{phrase}"
 
     return None
