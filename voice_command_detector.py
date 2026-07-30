@@ -20,16 +20,64 @@ import subprocess
 import tempfile
 import threading
 import time
+from difflib import SequenceMatcher
 from typing import Optional
 
 # Trigger phrases (lowercase). The streamer says these out loud.
-TRIGGER_PHRASES = {"clip it", "clip that", "clip this", "clip it!"}
+# We also do fuzzy matching against these since speech recognition
+# often mishears (e.g. "clip it" -> "repeat City", "clip that" -> "crip bat").
+TRIGGER_PHRASES = [
+    "clip it", "clip that", "clip this", "clip it now",
+    "clip that shit", "clip it clip it", "clip",
+]
+
+# Words that sound like trigger words (common mishearings by Google STT).
+# If the transcript contains any of these, treat it as a trigger.
+FUZZY_TRIGGER_WORDS = [
+    "clip", "klip", "grip", "crip", "flip", "click", "quip", "blip",
+    "snip", "skip", "repeat", "creep", "grip it", "flip it", "click it",
+    "skip it", "snip it", "quip it", "blip it",
+]
+
+# Minimum similarity ratio for fuzzy phrase matching (0.0 to 1.0).
+# Lower = more lenient (more false positives but catches more real triggers).
+FUZZY_THRESHOLD = 0.55
 
 # How often to capture + transcribe an audio chunk (seconds).
 CAPTURE_INTERVAL = 5.0
 
 # Duration of each audio chunk (seconds).
 CAPTURE_DURATION = 5.0
+
+
+def _fuzzy_match(transcript: str) -> Optional[str]:
+    """Check if the transcript matches a trigger phrase, using fuzzy matching.
+    Returns the matched phrase if found, None otherwise."""
+    low = transcript.lower().strip()
+
+    # 1) Exact substring match (fast path)
+    for phrase in TRIGGER_PHRASES:
+        if phrase in low:
+            return phrase
+
+    # 2) Fuzzy word match — if "clip" or a similar-sounding word is in the
+    # transcript, treat it as a trigger. This catches mishearings like
+    # "repeat City" (which contains no "clip" but sounds similar).
+    words = low.replace(",", " ").replace(".", " ").split()
+    for word in words:
+        for trigger_word in FUZZY_TRIGGER_WORDS:
+            ratio = SequenceMatcher(None, word, trigger_word).ratio()
+            if ratio >= FUZZY_THRESHOLD:
+                return f"fuzzy:{word}~{trigger_word}"
+
+    # 3) Fuzzy phrase match — compare the whole transcript against
+    # each trigger phrase.
+    for phrase in TRIGGER_PHRASES:
+        ratio = SequenceMatcher(None, low, phrase).ratio()
+        if ratio >= FUZZY_THRESHOLD:
+            return f"fuzzy:{low}~{phrase}"
+
+    return None
 
 
 class VoiceCommandDetector:
@@ -143,14 +191,13 @@ class VoiceCommandDetector:
             transcript = self._transcribe(tmp_path)
             if transcript:
                 self._last_transcript = transcript
-                low = transcript.lower().strip()
-                # Check if any trigger phrase is in the transcript
-                for phrase in TRIGGER_PHRASES:
-                    if phrase in low:
-                        print(f"[voice] TRIGGER HEARD: '{transcript}' (matched '{phrase}')")
-                        self._voice_command_time = time.time()
-                        self._voice_command_phrase = phrase
-                        return
+                # Use fuzzy matching to catch mishearings
+                matched = _fuzzy_match(transcript)
+                if matched:
+                    print(f"[voice] TRIGGER HEARD: '{transcript}' (matched '{matched}')")
+                    self._voice_command_time = time.time()
+                    self._voice_command_phrase = matched
+                    return
         finally:
             try:
                 os.unlink(tmp_path)
