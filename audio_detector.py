@@ -54,8 +54,18 @@ class AudioDetector:
             self._thread.join(timeout=5)
 
     def _stream_url(self) -> str:
-        # yt-dlp prints the direct HLS m3u8 to stdout with -g.
-        # Fallback: twitch.tv/<channel> works directly with ffmpeg's lavf.
+        """Get the direct HLS stream URL using yt-dlp.
+        ffmpeg can't open twitch.tv/<channel> directly — it needs the m3u8."""
+        try:
+            proc = subprocess.run(
+                ["python", "-m", "yt_dlp", "-g", "-f", "b", f"https://twitch.tv/{self.channel}"],
+                capture_output=True, text=True, timeout=15,
+            )
+            url = proc.stdout.strip().split("\n")[0].strip()
+            if url and url.startswith("http"):
+                return url
+        except Exception as e:
+            print(f"[audio] yt-dlp failed: {e}")
         return f"https://twitch.tv/{self.channel}"
 
     def _run(self) -> None:

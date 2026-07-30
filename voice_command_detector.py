@@ -76,6 +76,19 @@ class VoiceCommandDetector:
         return False, ""
 
     def _stream_url(self) -> str:
+        """Get the direct HLS stream URL using yt-dlp.
+        ffmpeg can't open twitch.tv/<channel> directly — it needs the m3u8."""
+        try:
+            proc = subprocess.run(
+                ["python", "-m", "yt_dlp", "-g", "-f", "b", f"https://twitch.tv/{self.channel}"],
+                capture_output=True, text=True, timeout=15,
+            )
+            url = proc.stdout.strip().split("\n")[0].strip()
+            if url and url.startswith("http"):
+                return url
+        except Exception as e:
+            print(f"[voice] yt-dlp failed: {e}")
+        # Fallback: try the twitch.tv URL directly (may work with some ffmpeg builds)
         return f"https://twitch.tv/{self.channel}"
 
     def _run(self) -> None:

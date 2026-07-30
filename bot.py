@@ -270,6 +270,16 @@ OAUTH_REDIRECT_BACK = f"{FRONTEND_URL}/atlas-clips?twitch_connected=1"
 async def _lifespan(_app: FastAPI):
     global bot
     bot = ClipperBot()
+    # Auto-start: if we have a valid token, start watching immediately.
+    # This handles Render free tier spin-downs — when the process restarts,
+    # the bot automatically resumes watching without user intervention.
+    if _bool("AUTO_START", True):
+        token = get_valid_user_token()
+        if token:
+            print("[bot] auto-starting (AUTO_START=true + token available)")
+            bot.start_watching()
+        else:
+            print("[bot] no token — auto-start skipped (visit /auth/twitch)")
     yield
     if bot:
         bot.stop_watching()

@@ -31,5 +31,7 @@ services:
         value: "300"
       - key: ENABLE_VOICE_COMMANDS
         value: "true"
+      - key: AUTO_START
+        value: "true"
       - key: PORT
         value: "10000"
